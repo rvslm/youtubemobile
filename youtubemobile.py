@@ -17,7 +17,7 @@ from dateutil import parser as dateparser
 st.set_page_config(
     page_title="CISF YouTube Monitor",
     page_icon="logo.jpeg",
-    layout="centered"  # Changed from "wide" to "centered" for mobile
+    layout="centered"
 )
 
 # -------------------------
@@ -106,15 +106,14 @@ def try_request(url, params, timeout=15):
             r = requests.get(url, params=p, timeout=timeout)
             if r.status_code == 200:
                 return r
-            last_response = r  # Store the last failed response
+            last_response = r
         except requests.exceptions.RequestException as e:
-            # Create a mock response for connection errors or other request exceptions
             last_response = requests.Response()
-            last_response.status_code = 500  # Internal Server Error or similar
+            last_response.status_code = 500
             last_response.reason = "Request Exception"
             last_response._content = str(e).encode('utf-8')
-            continue # Try next key
-    return last_response # Return the last response, whether success or fail
+            continue
+    return last_response
 
 def chunked(iterable, n):
     """Yield successive n-sized chunks from iterable."""
@@ -320,7 +319,6 @@ def get_channel_id_from_handle(handle):
         items = data.get("items", [])
         if items and items[0].get("id", {}).get("kind") == "youtube#channel":
             return items[0]["id"]["channelId"]
-    # Don't show error in function, handle it in the main app logic
     return None
 
 # ==============================
@@ -367,6 +365,74 @@ div.stButton > button:hover {
 }
 </style>""", unsafe_allow_html=True)
 
+# Helper functions for formatting
+def format_published_time(utc_dt):
+    try: return utc_dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+    except: return ""
+
+def get_status_icon(row):
+    if row['liveStatus'] == 'LIVE': return "<span style='color:red;'>🔴 LIVE</span>"
+    if row['liveStatus'] == 'UPCOMING': return "<span style='color:orange;'>🟠 UPCOMING</span>"
+    return "🎬 Short" if row['category'] == 'Short' else "▶️ Video"
+
+# Function to render a video card (re-usable for tab1 and tab3)
+def render_video_card(row, is_pinned_view=False):
+    
+    # Format data for display
+    title = row.get('title', 'No Title')
+    channel = row.get('channel', 'No Channel')
+    published_time = format_published_time(row.get('publishedAt'))
+    status = get_status_icon(row)
+    views = f"{int(row.get('views', 0)):,}"
+    likes = f"{int(row.get('likes', 0)):,}"
+    comments = f"{int(row.get('comments', 0)):,}"
+    thumbnail_url = row.get('thumbnail')
+    video_url = row.get('url', '#')
+    video_id = row.get('videoId')
+
+    with st.container(border=True):
+        # --- Row 1: Thumbnail + Info ---
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if thumbnail_url:
+                st.image(thumbnail_url, use_container_width=True)
+        with col2:
+            st.markdown(f"**{title}**")
+            st.markdown(f"_{channel}_")
+            st.caption(f"{published_time}")
+            st.markdown(status, unsafe_allow_html=True)
+        
+        # --- Row 2: Stats (Collapsible) ---
+        with st.expander("Show Stats"):
+            col3, col4, col5 = st.columns(3)
+            col3.metric("Views", views)
+            col4.metric("Likes", likes)
+            col5.metric("Comments", comments)
+        
+        # --- Row 3: Actions ---
+        col6, col7 = st.columns([1,1])
+        with col6:
+            # Pin/Unpin Button
+            if is_pinned_view:
+                if st.button("❌ Unpin", key=f"unpin_{video_id}", use_container_width=True):
+                    st.session_state.pinned_video_ids.remove(video_id)
+                    st.rerun()
+            else:
+                is_pinned = video_id in st.session_state.pinned_video_ids
+                button_label = "✅ Pinned" if is_pinned else "📌 Pin"
+                if st.button(button_label, key=f"pin_{video_id}", use_container_width=True):
+                    if is_pinned:
+                        st.session_state.pinned_video_ids.remove(video_id)
+                    else:
+                        st.session_state.pinned_video_ids.append(video_id)
+                    st.rerun()
+        
+        with col7:
+            # *** MODIFICATION: Replaced button with st.popover ***
+            with st.popover("▶️ Play", use_container_width=True):
+                st.video(video_url)
+
+
 # --- HEADER ---
 # NOTE: You need to have a 'logo.png' file in the same directory for this to work.
 logo_path = "logo.png"
@@ -394,7 +460,7 @@ if "started" not in st.session_state:
         except Exception: pass
     conn.close()
     st.session_state.last_updated_api = None
-    st.session_state.video_to_play = None
+    # st.session_state.video_to_play = None  # <-- This is no longer needed
     st.session_state.last_updated = datetime.now(IST)
     st.session_state.pinned_inputs = [""]
     
@@ -513,79 +579,11 @@ elif sort_by == "Most Viewed": df_filtered = df_filtered.sort_values(by="views",
 elif sort_by == "Most Commented": df_filtered = df_filtered.sort_values(by="comments", ascending=False)
 
 
-# ==============================
-# 🔹 TABS & LAYOUT
-# ==============================
+# ========================================================
+# 🔹 TABS & LAYOUT 🔹
+# (The main player logic has been removed from here)
+# ========================================================
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Main", "📈 Analytics", "📌 Pinned", "📺 Watch List"])
-
-# Helper functions for formatting
-def format_published_time(utc_dt):
-    try: return utc_dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
-    except: return ""
-
-def get_status_icon(row):
-    if row['liveStatus'] == 'LIVE': return "<span style='color:red;'>🔴 LIVE</span>"
-    if row['liveStatus'] == 'UPCOMING': return "<span style='color:orange;'>🟠 UPCOMING</span>"
-    return "🎬 Short" if row['category'] == 'Short' else "▶️ Video"
-
-# Function to render a video card (re-usable for tab1 and tab3)
-def render_video_card(row, is_pinned_view=False):
-    
-    # Format data for display
-    title = row.get('title', 'No Title')
-    channel = row.get('channel', 'No Channel')
-    published_time = format_published_time(row.get('publishedAt'))
-    status = get_status_icon(row)
-    views = f"{int(row.get('views', 0)):,}"
-    likes = f"{int(row.get('likes', 0)):,}"
-    comments = f"{int(row.get('comments', 0)):,}"
-    thumbnail_url = row.get('thumbnail')
-    video_url = row.get('url', '#')
-    video_id = row.get('videoId')
-
-    with st.container(border=True):
-        # --- Row 1: Thumbnail + Info ---
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if thumbnail_url:
-                # *** FIXED DEPRECATION WARNING HERE ***
-                st.image(thumbnail_url, use_container_width=True)
-        with col2:
-            st.markdown(f"**{title}**")
-            st.markdown(f"_{channel}_")
-            st.caption(f"{published_time}")
-            st.markdown(status, unsafe_allow_html=True)
-        
-        # --- Row 2: Stats (Collapsible) ---
-        # *** MODIFIED THIS SECTION TO BE COLLAPSIBLE ***
-        with st.expander("Show Stats"):
-            col3, col4, col5 = st.columns(3)
-            col3.metric("Views", views)
-            col4.metric("Likes", likes)
-            col5.metric("Comments", comments)
-        
-        # --- Row 3: Actions ---
-        col6, col7 = st.columns([1,1])
-        with col6:
-            # Pin/Unpin Button
-            if is_pinned_view:
-                if st.button("❌ Unpin", key=f"unpin_{video_id}", use_container_width=True):
-                    st.session_state.pinned_video_ids.remove(video_id)
-                    st.rerun()
-            else:
-                is_pinned = video_id in st.session_state.pinned_video_ids
-                button_label = "✅ Pinned" if is_pinned else "📌 Pin"
-                if st.button(button_label, key=f"pin_{video_id}", use_container_width=True):
-                    if is_pinned:
-                        st.session_state.pinned_video_ids.remove(video_id)
-                    else:
-                        st.session_state.pinned_video_ids.append(video_id)
-                    st.rerun()
-        
-        with col7:
-            # Link Button
-            st.link_button("🔗 Watch", video_url, use_container_width=True)
-
 
 with tab1:
     with st.expander("⚙️ Actions & Data Management", expanded=False):
@@ -793,15 +791,7 @@ with tab4:
                         st.write(channel.get('description', 'No description available.'))
 
 
-# --- PLAYER & DOWNLOAD ---
-if st.session_state.video_to_play:
-    st.markdown("---")
-    st.markdown("### Video Player")
-    st.video(f"https://www.youtube.com/watch?v={st.session_state.video_to_play}")
-    if st.button("Close Player"):
-        st.session_state.video_to_play = None
-        st.rerun()
-
+# --- DOWNLOAD BUTTON ---
 df_csv = df_filtered.copy()
 # Clean HTML tags for CSV export
 df_csv["title"] = df_csv["title"].str.replace(r'<[^>]+>', '', regex=True)
