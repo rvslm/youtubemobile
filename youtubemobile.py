@@ -321,6 +321,14 @@ def get_channel_id_from_handle(handle):
             return items[0]["id"]["channelId"]
     return None
 
+@st.cache_data(ttl=3600) # Cache channel details for 1 hour
+def get_multiple_channel_details_cached(channel_ids_tuple):
+    """
+    Cached wrapper for get_channel_details.
+    Accepts a tuple of IDs to be hashable for caching.
+    """
+    return get_channel_details(list(channel_ids_tuple))
+
 # ==============================
 # 🔹 STREAMLIT APP
 # ==============================
@@ -372,21 +380,79 @@ div.stButton > button:hover {
 .st-emotion-cache-1oogi0e:hover {
     background-color: var(--button-hover-bg); border-color: #ff671f;
 }
+
+/* --- NEW CSS FOR YOUTUBE-STYLE CARD --- */
+.channel-avatar {
+    border-radius: 50%;
+    width: 40px; /* Smaller avatar */
+    height: 40px;
+    object-fit: cover;
+    margin-top: 8px; /* Add some space from the top */
+}
+/* Tighter spacing for card text */
+.card-text-col p {
+    line-height: 1.3;
+    margin-bottom: 0.25rem; /* Tighter line spacing */
+}
+.card-text-col h3 {
+    margin-bottom: 0.25rem; /* Tighter title spacing */
+    /* Clamp title to 2 lines */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* number of lines to show */
+    -webkit-box-orient: vertical;
+}
+/* Reduce padding on the main card container */
+.st-emotion-cache-0 {
+    padding-top: 1rem; /* Default is 1rem */
+}
+div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stExpander"] {
+    margin-top: 0.5rem; /* Reduce space above expander */
+}
+
+/* Make thumbnail popover button (the image) have no padding */
+div[data-testid="stPopover"] > button {
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+}
 </style>""", unsafe_allow_html=True)
 
 # Helper functions for formatting
 def format_published_time(utc_dt):
     try: return utc_dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
     except: return ""
+    
+def format_published_time_relative(utc_dt):
+    """ More mobile-like relative time format """
+    try:
+        now = utcnow()
+        dt = utc_dt.astimezone(UTC)
+        diff = now - dt
+        
+        if diff.days > 7:
+            return dt.astimezone(IST).strftime("%d %b %Y")
+        if diff.days >= 1:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        if diff.seconds >= 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        if diff.seconds >= 60:
+            mins = diff.seconds // 60
+            return f"{mins} minute{'s' if mins > 1 else ''} ago"
+        return "Just now"
+    except Exception:
+        return ""
 
 def get_status_icon(row):
-    if row['liveStatus'] == 'LIVE': return "<span style='color:red;'>🔴 LIVE</span>"
+    if row['liveStatus'] == 'LIVE': return "<span style'color:red;'>🔴 LIVE</span>"
     if row['liveStatus'] == 'UPCOMING': return "<span style='color:orange;'>🟠 UPCOMING</span>"
     return "🎬 Short" if row['category'] == 'Short' else "▶️ Video"
 
 #
 # ====================================================================
-# 🔹 RENDER VIDEO CARD FUNCTION (THIS IS THE MAIN CHANGE) 🔹
+# 🔹 RENDER VIDEO CARD FUNCTION (YOUTUBE MOBILE STYLE) 🔹
 # ====================================================================
 #
 def render_video_card(row, is_pinned_view=False):
@@ -394,93 +460,140 @@ def render_video_card(row, is_pinned_view=False):
     # Format data for display
     title = row.get('title', 'No Title')
     channel = row.get('channel', 'No Channel')
-    channel_id = row.get('channelId') # <-- Need this for watchlist
-    published_time = format_published_time(row.get('publishedAt'))
+    channel_id = row.get('channelId')
+    
+    # Use relative time for mobile view
+    published_time_str = format_published_time_relative(row.get('publishedAt'))
+    
     status = get_status_icon(row)
-    views = f"{int(row.get('views', 0)):,}"
-    likes = f"{int(row.get('likes', 0)):,}"
-    comments = f"{int(row.get('comments', 0)):,}"
+    
+    # --- NEW: Format Views, Likes, Comments ---
+    views = int(row.get('views', 0))
+    views_str = f"{views:,}"
+    if views > 1_000_000: views_str = f"{views/1_000_000:.1f}M"
+    elif views > 1_000: views_str = f"{views/1_000:.0f}K"
+    else: views_str = f"{views}"
+        
+    likes = int(row.get('likes', 0))
+    likes_str = f"{likes:,}"
+    if likes > 1_000_000: likes_str = f"{likes/1_000_000:.1f}M"
+    elif likes > 1_000: likes_str = f"{likes/1_000:.0f}K"
+    else: likes_str = f"{likes}"
+
+    comments = int(row.get('comments', 0))
+    comments_str = f"{comments:,}"
+    if comments > 1_000_000: comments_str = f"{comments/1_000_000:.1f}M"
+    elif comments > 1_000: comments_str = f"{comments/1_000:.0f}K"
+    else: comments_str = f"{comments}"
+    # --- END NEW FORMAT ---
+    
     thumbnail_url = row.get('thumbnail')
     video_url = row.get('url', '#')
     video_id = row.get('videoId')
+    
+    # NEW: Get channel avatar
+    channel_thumbnail_url = row.get('channelThumbnail') # This comes from the pre-render merge
 
+    # --- FIX: Add a key prefix based on the context (tab) ---
+    key_prefix = "pinned_view_" if is_pinned_view else "main_view_"
+
+    # --- FIX: Removed height=None ---
     with st.container(border=True):
-        # --- Row 1: Thumbnail + Info ---
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if thumbnail_url:
-                st.image(thumbnail_url, use_container_width=True)
-        with col2:
-            st.markdown(f"**{title}**")
-            st.markdown(f"_{channel}_")
-            st.caption(f"{published_time}")
-            st.markdown(status, unsafe_allow_html=True)
         
-        # --- Row 2: Stats (Collapsible) ---
-        with st.expander("Show Stats"):
-            col3, col4, col5 = st.columns(3)
-            col3.metric("Views", views)
-            col4.metric("Likes", likes)
-            col5.metric("Comments", comments)
-        
-        # --- Row 3: Actions (NOW 3 COLUMNS) ---
-        col6, col7, col8 = st.columns(3) # <-- Changed to 3 columns
-
-        with col6:
-            # --- Pin/Unpin Button ---
-            if is_pinned_view:
-                if st.button("❌ Unpin", key=f"unpin_{video_id}", use_container_width=True):
-                    st.session_state.pinned_video_ids.remove(video_id)
-                    st.rerun()
-            else:
-                is_pinned = video_id in st.session_state.pinned_video_ids
-                button_label = "✅ Pinned" if is_pinned else "📌 Pin"
-                if st.button(button_label, key=f"pin_{video_id}", use_container_width=True):
-                    if is_pinned:
-                        st.session_state.pinned_video_ids.remove(video_id)
-                    else:
-                        st.session_state.pinned_video_ids.append(video_id)
-                    st.rerun()
-        
-        with col7:
-            # --- NEW WATCHLIST BUTTON ---
-            is_in_watchlist = False
-            if channel_id:
-                for item in st.session_state.watchlist_inputs:
-                    if channel_id in item:
-                        is_in_watchlist = True
-                        break
-            
-            if is_in_watchlist:
-                st.button("📺 Added", key=f"watch_{video_id}", use_container_width=True, disabled=True)
-            else:
-                if st.button("📺 Add", key=f"watch_{video_id}", use_container_width=True, help="Add channel to Watch List"):
-                    if channel_id:
-                        # Add the channel ID to the session state list
-                        if st.session_state.watchlist_inputs and st.session_state.watchlist_inputs[-1] == "":
-                            st.session_state.watchlist_inputs.pop()
-                        
-                        st.session_state.watchlist_inputs.append(channel_id)
-                        st.session_state.watchlist_inputs.append("") # Add the empty string back
-                        
-                        # --- Also save to file automatically ---
-                        try:
-                            with open(WATCHLIST_FILE_PATH, "w") as f:
-                                for entry in st.session_state.watchlist_inputs:
-                                    if entry.strip():
-                                        f.write(f"{entry.strip()}\n")
-                            st.toast(f"Added {channel} to Watch List!", icon="📺")
-                        except Exception as e:
-                            st.error(f"Could not save watchlist: {e}")
-                        
-                        st.rerun() # Rerun to update button state to "Added"
-                    else:
-                        st.toast("Could not find Channel ID.", icon="🚨")
-
-        with col8:
-            # --- Play Button (Popover) ---
-            with st.popover("▶️ Play", use_container_width=True):
+        # --- Row 1: Thumbnail (wrapped in popover) ---
+        if thumbnail_url:
+            with st.popover("", use_container_width=True):
                 st.video(video_url)
+            # This is a bit of a hack to make the image display inside the popover button area
+            st.image(thumbnail_url, use_container_width=True)
+        
+        # --- Row 2: Avatar + Info ---
+        col1, col2 = st.columns([0.15, 0.85], gap="small")
+        with col1:
+            if channel_thumbnail_url:
+                st.markdown(f'<img src="{channel_thumbnail_url}" class="channel-avatar">', unsafe_allow_html=True)
+            else:
+                # Placeholder with first letter of channel
+                placeholder_letter = channel[0] if channel and channel != "No Channel" else "C"
+                st.markdown(f'<img src="https://placehold.co/48x48/808080/FFFFFF?text={placeholder_letter}" class="channel-avatar">', unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(f"<div class='card-text-col'><h3>{title}</h3></div>", unsafe_allow_html=True)
+            # --- NEW: Combined stats line ---
+            st.caption(f"{channel} • {views_str} views • {likes_str} likes • {comments_str} comments • {published_time_str}")
+            if row['liveStatus'] != 'NORMAL':
+                st.markdown(status, unsafe_allow_html=True)
+        
+        # --- Row 3: Actions (Collapsible) ---
+        with st.expander("Actions & Stats"):
+            # Stats (full numbers)
+            scol1, scol2, scol3 = st.columns(3)
+            scol1.metric("Views", f"{int(row.get('views', 0)):,}")
+            scol2.metric("Likes", f"{int(row.get('likes', 0)):,}")
+            scol3.metric("Comments", f"{int(row.get('comments', 0)):,}")
+            
+            st.markdown("---")
+            
+            # --- UPDATED: Action Buttons (2 columns) ---
+            acol1, acol2 = st.columns(2)
+            with acol1:
+                # --- Pin/Unpin Button ---
+                if is_pinned_view:
+                    if st.button("❌ Unpin", key=f"{key_prefix}unpin_{video_id}", use_container_width=True):
+                        st.session_state.pinned_video_ids.remove(video_id)
+                        st.rerun()
+                else:
+                    is_pinned = video_id in st.session_state.pinned_video_ids
+                    button_label = "✅ Pinned" if is_pinned else "📌 Pin"
+                    if st.button(button_label, key=f"{key_prefix}pin_{video_id}", use_container_width=True):
+                        if is_pinned:
+                            st.session_state.pinned_video_ids.remove(video_id)
+                        else:
+                            st.session_state.pinned_video_ids.append(video_id)
+                        st.rerun()
+            
+            with acol2:
+                # --- NEW WATCHLIST BUTTON ---
+                is_in_watchlist = False
+                if channel_id:
+                    for item in st.session_state.watchlist_inputs:
+                        if item.strip() == channel_id: 
+                            is_in_watchlist = True
+                            break
+                
+                if is_in_watchlist:
+                    st.button("📺 Added", key=f"{key_prefix}watch_{video_id}", use_container_width=True, disabled=True)
+                else:
+                    if st.button("📺 Add", key=f"{key_prefix}watch_{video_id}", use_container_width=True, help="Add channel to Watch List"):
+                        if channel_id:
+                            empty_slot_index = -1
+                            for i, val in enumerate(st.session_state.watchlist_inputs):
+                                if not val.strip():
+                                    empty_slot_index = i
+                                    break
+                            
+                            if empty_slot_index != -1:
+                                st.session_state.watchlist_inputs[empty_slot_index] = channel_id
+                            else:
+                                st.session_state.watchlist_inputs.insert(len(st.session_state.watchlist_inputs)-1, channel_id)
+
+                            if st.session_state.watchlist_inputs[-1].strip() != "":
+                                st.session_state.watchlist_inputs.append("")
+                            
+                            try:
+                                with open(WATCHLIST_FILE_PATH, "w") as f:
+                                    for entry in st.session_state.watchlist_inputs:
+                                        if entry.strip():
+                                            f.write(f"{entry.strip()}\n")
+                                st.toast(f"Added {channel} to Watch List!", icon="📺")
+                            except Exception as e:
+                                st.error(f"Could not save watchlist: {e}")
+                            
+                            st.rerun()
+                        else:
+                            st.toast("Could not find Channel ID.", icon="🚨")
+
+            # --- REMOVED: Old Play Button Column ---
 #
 # ====================================================================
 # 🔹 END OF CARD FUNCTION 🔹
@@ -489,7 +602,6 @@ def render_video_card(row, is_pinned_view=False):
 
 
 # --- HEADER ---
-# NOTE: You need to have a 'logo.png' file in the same directory for this to work.
 logo_path = "logo.png"
 if os.path.exists(logo_path):
     with open(logo_path, "rb") as f:
@@ -556,36 +668,23 @@ with st.expander("⚙️ Settings & Watchlist", expanded=False):
     
     st.markdown("## 📌 Pinned Videos")
     st.info("Add video URLs or IDs here to pin them to the Pinned Videos tab.")
-    new_values = []
+    
+    # --- CORRECTED DYNAMIC WIDGET LOGIC ---
     for i, val in enumerate(st.session_state.pinned_inputs):
-        v = st.text_input(f"Pinned Video {i+1} (ID or URL):", val, key=f"pinned_{i}")
-        new_values.append(v)
-    if new_values and new_values[-1].strip() != "":
-        new_values.append("")
+        if f"pinned_{i}" not in st.session_state:
+            st.session_state[f"pinned_{i}"] = val
+        st.text_input(f"Pinned Video {i+1} (ID or URL):", key=f"pinned_{i}")
+
+    last_key = f"pinned_{len(st.session_state.pinned_inputs) - 1}"
+    if last_key in st.session_state and st.session_state[last_key].strip() != "":
+        st.session_state.pinned_inputs.append("")
+        st.rerun()
+
+    new_values = []
+    for i in range(len(st.session_state.pinned_inputs)):
+        new_values.append(st.session_state.get(f"pinned_{i}", ""))
     st.session_state.pinned_inputs = new_values
-    
-    st.markdown("---")
-    st.markdown("## 📺 Watch List")
-    st.info("Add channel URLs or IDs. Channels are also added automatically via the '📺 Add' button.")
-    new_watchlist_values = []
-    for i, val in enumerate(st.session_state.watchlist_inputs):
-        v = st.text_input(f"Channel {i+1} (ID or URL):", val, key=f"watchlist_{i}")
-        new_watchlist_values.append(v)
-    if new_watchlist_values and new_watchlist_values[-1].strip() != "":
-        new_watchlist_values.append("")
-    st.session_state.watchlist_inputs = new_watchlist_values
-    
-    if st.button("Update Watch List", key="update_watchlist"):
-        # Save the current watchlist to a file
-        try:
-            with open(WATCHLIST_FILE_PATH, "w") as f:
-                for entry in st.session_state.watchlist_inputs:
-                    if entry.strip():
-                        f.write(f"{entry.strip()}\n")
-            st.toast("Watch list saved!", icon="💾")
-        except Exception as e:
-            st.error(f"Could not save watchlist: {e}")
-        # The button click will also trigger a rerun
+    # --- END CORRECTION ---
 
 
 # Consolidate pins from settings into the main list of pinned IDs
@@ -640,54 +739,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Main", "📈 Analytics", "📌 Pinned", 
 
 with tab1:
     with st.expander("⚙️ Actions & Data Management", expanded=False):
-        # --- ACTION BUTTONS ---
-        action_cols = st.columns(3)
-        if action_cols[0].button("🔄 Refresh", use_container_width=True, help="Full Refresh"):
-            with st.spinner('Refreshing...'):
-                # Step 1 - Delete old videos
-                seven_days_ago = to_sql_utc_string(utcnow() - timedelta(days=7))
-                cur = conn.cursor()
-                cur.execute("DELETE FROM videos WHERE datetime(publishedAt) < datetime(?)", (seven_days_ago,))
-                deleted_count = cur.rowcount
-                conn.commit()
-                if deleted_count > 0:
-                    st.toast(f"🧹 Cleared {deleted_count} videos older than 7 days.", icon="🧹")
-
-                # Step 2 - Search for new videos
-                queries = [q.strip() for q in st.session_state.queries.split(',') if q.strip()]
-                all_video_objs = []
-                for q in queries:
-                    all_video_objs.extend(youtube_search(q))
-                
-                # Step 3 - Get the last 100 video IDs to update
-                ids_to_update = db_get_video_ids(conn, None, limit=100, order_by_published=True)
-                for vid in ids_to_update:
-                    all_video_objs.append({'videoId': vid, 'sourceKeyword': None})
-
-                # Step 4 - De-duplicate and fetch details
-                seen_ids = set()
-                unique_video_objs = []
-                for video_obj in all_video_objs:
-                    if video_obj['videoId'] not in seen_ids:
-                        unique_video_objs.append(video_obj)
-                        seen_ids.add(video_obj['videoId'])
-                
-                if unique_video_objs:
-                    details = get_video_details(unique_video_objs)
-                    if details:
-                        db_upsert_videos(conn, details)
-
-                st.session_state.last_updated = datetime.now(IST)
-                st.rerun()
-
-        if action_cols[1].button("🗑️ Clear All", use_container_width=True):
-            cur = conn.cursor()
-            cur.execute("DELETE FROM videos;")
-            conn.commit()
-            st.success("All videos cleared from database.")
-            st.rerun()
-
-        if action_cols[2].button("⚡ Quick", use_container_width=True, help="Quick Update (Last Hour)"):
+        if st.button("⚡ Quick Update", use_container_width=True, help="Quick Update (Last Hour)"):
             with st.spinner('Fetching latest videos...'):
                 queries = [q.strip() for q in st.session_state.queries.split(',') if q.strip()]
                 latest_video_objs = []
@@ -706,18 +758,31 @@ with tab1:
                         if details:
                             db_upsert_videos(conn, details)
                 
-                st.session_state.last_updated = datetime.now(IST)
-                st.rerun()
+            st.session_state.last_updated = datetime.now(IST)
+            st.rerun()
 
     # --- VIDEO LIST ---
     st.markdown("### Video List")
     st.markdown(f"<p style='font-size: 0.9em; margin-top: -10px;'>Last updated: {st.session_state.last_updated.strftime('%d %b %Y, %I:%M %p IST')}</p>", unsafe_allow_html=True)
     
-    display_df = df_filtered.copy()
-
-    if display_df.empty:
+    # --- NEW: Logic to fetch channel details for visible cards ---
+    if df_filtered.empty:
         st.info("No videos found matching your criteria. Try refreshing or adjusting filters.")
+        display_df = df_filtered.copy() # Will be empty
     else:
+        all_visible_channel_ids = df_filtered['channelId'].unique().tolist()
+        # Pass as a tuple to make it hashable for caching
+        channel_details_list = get_multiple_channel_details_cached(tuple(all_visible_channel_ids))
+        
+        if channel_details_list:
+            channel_df = pd.DataFrame(channel_details_list)[['channelId', 'thumbnail']]
+            # Rename thumbnail col to avoid conflict with video thumbnail
+            channel_df = channel_df.rename(columns={'thumbnail': 'channelThumbnail'}) 
+            display_df = pd.merge(df_filtered, channel_df, on='channelId', how='left')
+        else:
+            display_df = df_filtered.copy()
+            display_df['channelThumbnail'] = None # Ensure col exists
+
         st.markdown(f"**Showing {len(display_df)} videos**")
         for i, row in display_df.iterrows():
             render_video_card(row, is_pinned_view=False)
@@ -776,6 +841,18 @@ with tab3:
             pinned_display_df = pd.DataFrame(pinned_details)
             pinned_display_df['publishedAt'] = pd.to_datetime(pinned_display_df['publishedAt'], errors='coerce', utc=True)
             
+            # --- NEW: Logic to fetch channel details for pinned cards ---
+            pinned_channel_ids = pinned_display_df['channelId'].unique().tolist()
+            pinned_channel_details_list = get_multiple_channel_details_cached(tuple(pinned_channel_ids))
+            
+            if pinned_channel_details_list:
+                pinned_channel_df = pd.DataFrame(pinned_channel_details_list)[['channelId', 'thumbnail']]
+                pinned_channel_df = pinned_channel_df.rename(columns={'thumbnail': 'channelThumbnail'}) 
+                pinned_display_df = pd.merge(pinned_display_df, pinned_channel_df, on='channelId', how='left')
+            else:
+                pinned_display_df['channelThumbnail'] = None # Ensure col exists
+            # --- END NEW LOGIC ---
+            
             st.markdown(f"**Showing {len(pinned_display_df)} pinned videos**")
             for i, row in pinned_display_df.iterrows():
                 render_video_card(row, is_pinned_view=True)
@@ -790,14 +867,14 @@ with tab4:
     watchlist_ids = set()
     unparsed_entries = []
     
+    current_watchlist_entries = st.session_state.get('watchlist_inputs', [""])
+    
     with st.spinner("Resolving channel handles..."):
-        for entry in st.session_state.watchlist_inputs:
+        for entry in current_watchlist_entries:
             entry = entry.strip()
             if not entry: continue
             
-            # Regex for standard UC... channel ID
             uc_match = re.search(r'(UC[a-zA-Z0-9_\-]{22})', entry)
-            # Regex for new @handle format from URL
             handle_match = re.search(r'@([a-zA-Z0-9_.-]+)', entry)
 
             if uc_match:
@@ -809,6 +886,8 @@ with tab4:
                     watchlist_ids.add(channel_id)
                 else:
                     unparsed_entries.append(entry)
+            elif len(entry) == 24 and entry.startswith("UC"):
+                 watchlist_ids.add(entry)
             else:
                 unparsed_entries.append(entry)
 
@@ -817,7 +896,7 @@ with tab4:
         st.info("Please provide a valid full channel URL (e.g., .../channel/UC... or .../@handle) or just the Channel ID/Handle itself.")
 
     if not watchlist_ids:
-        st.info("No channels added to the watch list yet. Add a channel from the Settings expander.")
+        st.info("No channels added to the watch list yet. Add a channel using the '📺 Add' button on a video.")
     else:
         with st.spinner("Fetching channel details..."):
             channel_details = get_channel_details(list(watchlist_ids))
@@ -827,7 +906,7 @@ with tab4:
         elif channel_details:
             for channel in sorted(channel_details, key=lambda x: x['channelName']):
                 with st.container(border=True):
-                    col1, col2 = st.columns([1, 3])
+                    col1, col2, col3 = st.columns([1, 3, 1]) 
                     with col1:
                         if channel.get('thumbnail'):
                             st.image(channel['thumbnail'], width=88)
@@ -835,6 +914,38 @@ with tab4:
                         st.subheader(channel['channelName'])
                         st.markdown(f"**Subs:** {channel.get('subscriberCount', 0):,} | **Videos:** {channel.get('videoCount', 0):,}")
                         st.markdown(f"[Go to Channel]({channel['url']})", unsafe_allow_html=True)
+                    
+                    with col3:
+                        channel_id_to_remove = channel['channelId']
+                        if st.button("❌ Remove", key=f"remove_watch_{channel_id_to_remove}", use_container_width=True):
+                            
+                            current_watchlist = st.session_state.watchlist_inputs
+                            new_watchlist = []
+                            removed = False
+                            
+                            for entry in current_watchlist:
+                                entry_s = entry.strip()
+                                if entry_s == channel_id_to_remove or channel_id_to_remove in entry_s:
+                                    removed = True
+                                else:
+                                    new_watchlist.append(entry)
+                            
+                            if not any(not e.strip() for e in new_watchlist) and "" not in new_watchlist:
+                                new_watchlist.append("")
+
+                            st.session_state.watchlist_inputs = new_watchlist
+                            
+                            try:
+                                with open(WATCHLIST_FILE_PATH, "w") as f:
+                                    for entry in st.session_state.watchlist_inputs:
+                                        if entry.strip():
+                                            f.write(f"{entry.strip()}\n")
+                                st.toast(f"Removed {channel['channelName']} from Watch List!", icon="📺")
+                            except Exception as e:
+                                st.error(f"Could not save watchlist: {e}")
+                            
+                            st.rerun()
+
                     with st.expander("Show Description"):
                         st.write(channel.get('description', 'No description available.'))
 
