@@ -737,15 +737,8 @@ with tab1:
 
     st.markdown(f"<p style='font-size: 0.9em; margin-top: -10px;'>Last updated: {st.session_state.last_updated.strftime('%d %b %Y, %I:%M %p IST')}</p>", unsafe_allow_html=True)
     
-    # --- Shelf 1: Live & Upcoming ---
-    if not df_live.empty:
-        st.subheader("🔴 Live & Upcoming")
-        cols = st.columns(len(df_live))
-        for i, (col, (idx, row)) in enumerate(zip(cols, df_live.iterrows())):
-            with col:
-                render_video_card(row, is_pinned_view=False, key_prefix=f"live_{row['videoId']}")
-        st.divider()
-
+    # --- Shelf 1: Live & Upcoming (REMOVED) ---
+    
     # --- Main Video List ---
     st.subheader("All Videos")
     display_df = df_filtered.copy()
