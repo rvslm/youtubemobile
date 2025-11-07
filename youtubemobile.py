@@ -381,7 +381,8 @@ div.stButton > button:hover {
     font-weight: bold;
     color: white;
     display: inline-block;
-    margin-top: 5px;
+    /* margin-top: 5px; <-- No longer needed on its own line */
+    vertical-align: middle; /* Aligns badge with the small text */
 }
 .badge-live { background-color: #D90429; } /* Red */
 .badge-upcoming { background-color: #FF9900; } /* Orange */
@@ -408,7 +409,7 @@ def get_status_icon(row):
 
 #
 # ====================================================================
-# 🔹 RENDER VIDEO CARD FUNCTION (Unchanged from last version) 🔹
+# 🔹 RENDER VIDEO CARD FUNCTION (MODIFIED) 🔹
 # ====================================================================
 #
 def render_video_card(row, is_pinned_view=False, key_prefix=""):
@@ -420,7 +421,7 @@ def render_video_card(row, is_pinned_view=False, key_prefix=""):
     published_time = format_published_time(row.get('publishedAt'))
     
     # --- Uses the NEW get_status_icon function ---
-    status = get_status_icon(row) 
+    status_html = get_status_icon(row) # Renamed to status_html for clarity
     
     views = f"{int(row.get('views', 0)):,}"
     likes = f"{int(row.get('likes', 0)):,}"
@@ -442,13 +443,14 @@ def render_video_card(row, is_pinned_view=False, key_prefix=""):
         st.markdown(f"**{title}**")
         st.markdown(f"_{channel}_")
         
-        # --- Stats and Time combined in one line ---
-        st.caption(f"Views: {views} | Likes: {likes} | Comments: {comments} | {published_time}")
-
-        # --- Status Badge ---
-        st.markdown(status, unsafe_allow_html=True)
+        # --- Row 3: Stats, Time, and Badge combined in one line ---
+        stats_line = f"Views: {views} | Likes: {likes} | Comments: {comments} | {published_time}"
+        # We use markdown with <small> tag to mimic st.caption and allow HTML for the badge
+        st.markdown(f"<small>{stats_line} &nbsp; {status_html}</small>", unsafe_allow_html=True)
         
-        st.divider() # Visual separation
+        # --- Status Badge (REMOVED from its old position) ---
+        
+        # st.divider() # Visual separation <-- This was already removed
 
         # --- Row 4: Actions ---
         col6, col7, col8 = st.columns(3) 
