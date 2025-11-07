@@ -372,6 +372,22 @@ div.stButton > button:hover {
 .st-emotion-cache-1oogi0e:hover {
     background-color: var(--button-hover-bg); border-color: #ff671f;
 }
+
+/* --- NEW CSS FOR BADGES --- */
+.status-badge {
+    padding: 3px 10px;
+    border-radius: 15px;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: white;
+    display: inline-block;
+    margin-top: 5px;
+}
+.badge-live { background-color: #D90429; } /* Red */
+.badge-upcoming { background-color: #FF9900; } /* Orange */
+.badge-video { background-color: #046A38; } /* Green */
+.badge-short { background-color: #5A4AE3; } /* Purple */
+
 </style>""", unsafe_allow_html=True)
 
 # Helper functions for formatting
@@ -379,24 +395,33 @@ def format_published_time(utc_dt):
     try: return utc_dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
     except: return ""
 
+# --- UPDATED: get_status_icon now returns modern badges ---
 def get_status_icon(row):
-    if row['liveStatus'] == 'LIVE': return "<span style='color:red;'>🔴 LIVE</span>"
-    if row['liveStatus'] == 'UPCOMING': return "<span style='color:orange;'>🟠 UPCOMING</span>"
-    return "🎬 Short" if row['category'] == 'Short' else "▶️ Video"
+    """Returns an HTML string for a modern status badge."""
+    if row['liveStatus'] == 'LIVE':
+        return "<span class='status-badge badge-live'>🔴 LIVE</span>"
+    if row['liveStatus'] == 'UPCOMING':
+        return "<span class='status-badge badge-upcoming'>🟠 UPCOMING</span>"
+    if row['category'] == 'Short':
+        return "<span class='status-badge badge-short'>🎬 Short</span>"
+    return "<span class='status-badge badge-video'>▶️ Video</span>"
 
 #
 # ====================================================================
-# 🔹 RENDER VIDEO CARD FUNCTION (THIS IS THE MAIN CHANGE) 🔹
+# 🔹 RENDER VIDEO CARD FUNCTION (Unchanged from last version) 🔹
 # ====================================================================
 #
-def render_video_card(row, is_pinned_view=False):
+def render_video_card(row, is_pinned_view=False, key_prefix=""):
     
     # Format data for display
     title = row.get('title', 'No Title')
     channel = row.get('channel', 'No Channel')
     channel_id = row.get('channelId') # <-- Need this for watchlist
     published_time = format_published_time(row.get('publishedAt'))
-    status = get_status_icon(row)
+    
+    # --- Uses the NEW get_status_icon function ---
+    status = get_status_icon(row) 
+    
     views = f"{int(row.get('views', 0)):,}"
     likes = f"{int(row.get('likes', 0)):,}"
     comments = f"{int(row.get('comments', 0)):,}"
@@ -404,8 +429,9 @@ def render_video_card(row, is_pinned_view=False):
     video_url = row.get('url', '#')
     video_id = row.get('videoId')
 
-    # --- FIX: Add a key prefix based on the context (tab) ---
-    key_prefix = "pinned_view_" if is_pinned_view else "main_view_"
+    # --- Add a key prefix based on the context (tab/shelf) ---
+    # We now pass this in as an argument
+    key_prefix += "pinned_view_" if is_pinned_view else "main_view_"
 
     with st.container(border=True):
         # --- Row 1: Thumbnail ---
@@ -416,17 +442,11 @@ def render_video_card(row, is_pinned_view=False):
         st.markdown(f"**{title}**")
         st.markdown(f"_{channel}_")
         
-        # --- MODIFIED ROW: Stats and Time combined in one line ---
+        # --- Stats and Time combined in one line ---
         st.caption(f"Views: {views} | Likes: {likes} | Comments: {comments} | {published_time}")
-        # --- END MODIFICATION ---
 
+        # --- Status Badge ---
         st.markdown(status, unsafe_allow_html=True)
-        
-        # --- Row 3: Stats (REMOVED) ---
-        # col3, col4, col5 = st.columns(3)
-        # col3.metric("Views", views)
-        # col4.metric("Likes", likes)
-        # col5.metric("Comments", comments)
         
         st.divider() # Visual separation
 
@@ -455,7 +475,7 @@ def render_video_card(row, is_pinned_view=False):
             if channel_id:
                 # Check against the list in session state
                 for item in st.session_state.watchlist_inputs:
-                    if item.strip() == channel_id: # <-- FIX: Was 'channel_id in item'
+                    if item.strip() == channel_id: 
                         is_in_watchlist = True
                         break
             
@@ -465,7 +485,6 @@ def render_video_card(row, is_pinned_view=False):
                 if st.button("📺 Add", key=f"{key_prefix}watch_{video_id}", use_container_width=True, help="Add channel to Watch List"):
                     if channel_id:
                         # --- NEW ROBUST ADD LOGIC ---
-                        # Find the index of the first empty string in the list
                         empty_slot_index = -1
                         for i, val in enumerate(st.session_state.watchlist_inputs):
                             if not val.strip():
@@ -473,14 +492,10 @@ def render_video_card(row, is_pinned_view=False):
                                 break
                         
                         if empty_slot_index != -1:
-                            # Found an empty slot. Update the list
                             st.session_state.watchlist_inputs[empty_slot_index] = channel_id
                         else:
-                            # No empty slot found (shouldn't happen, but as a fallback)
-                            # Add to the end of the list, just before the (non-existent) empty slot
                             st.session_state.watchlist_inputs.insert(len(st.session_state.watchlist_inputs)-1, channel_id)
 
-                        # Ensure there's always one empty slot at the end
                         if st.session_state.watchlist_inputs[-1].strip() != "":
                             st.session_state.watchlist_inputs.append("")
                         # --- END NEW LOGIC ---
@@ -511,7 +526,6 @@ def render_video_card(row, is_pinned_view=False):
 
 
 # --- HEADER ---
-# NOTE: You need to have a 'logo.png' or 'logo.jpeg' file in the same directory for this to work.
 logo_path = "logo.jpeg" if os.path.exists("logo.jpeg") else "logo.png"
 if os.path.exists(logo_path):
     try:
@@ -573,9 +587,59 @@ if not df.empty:
 all_channels = sorted(df['channel'].unique()) if not df.empty else []
 
 
-# --- SETTINGS EXPANDER (MOVED FROM SIDEBAR) ---
-with st.expander("⚙️ Settings & Watchlist", expanded=False):
-    st.markdown(f"**Time:** {datetime.now(IST).strftime('%d %b %Y, %I:%M %p')}")
+# ========================================================
+# 🔹 SIDEBAR CONTROLS 🔹
+# ========================================================
+
+st.sidebar.markdown(f"**Time:** {datetime.now(IST).strftime('%d %b %Y, %I:%M %p')}")
+
+# --- Actions moved to Sidebar ---
+if st.sidebar.button("⚡ Quick Update (Refresh)", use_container_width=True, help="Quick Update (Last Hour)"):
+    with st.spinner('Fetching latest videos...'):
+        queries = [q.strip() for q in st.session_state.queries.split(',') if q.strip()]
+        latest_video_objs = []
+        published_after_dt = utcnow() - timedelta(hours=1)
+        published_after_str = to_rfc3339_z(published_after_dt)
+
+        for q in queries:
+            latest_video_objs.extend(youtube_search(q, publishedAfter=published_after_str))
+        
+        if latest_video_objs:
+            seen_ids = set()
+            unique_latest_objs = [obj for obj in latest_video_objs if obj['videoId'] not in seen_ids and not seen_ids.add(obj['videoId'])]
+            
+            if unique_latest_objs:
+                details = get_video_details(unique_latest_objs)
+                if details:
+                    db_upsert_videos(conn, details)
+        
+            st.session_state.last_updated = datetime.now(IST)
+    st.rerun()
+
+st.sidebar.divider()
+
+# --- KPIs moved to Sidebar ---
+if not df.empty:
+    st.sidebar.subheader("Total Stats")
+    kpi1, kpi2 = st.sidebar.columns(2)
+    kpi1.metric("Total Videos", f"{len(df)}")
+    kpi2.metric("Total Views", f"{df['views'].sum():,}")
+else:
+    st.sidebar.info("No data in database. Click 'Quick Update' to fetch videos.")
+
+# --- Filters moved to Sidebar ---
+with st.sidebar.expander("🎛️ Filter Videos", expanded=True):
+    f_cols_1 = st.columns(2)
+    search_query = f_cols_1[0].text_input("🔍 Search", key="search_query")
+    selected_channel = f_cols_1[1].selectbox("Channel", ["All Channels"] + all_channels, key="selected_channel")
+    
+    f_cols_2 = st.columns(3)
+    time_filter_option = f_cols_2[0].selectbox("Timeframe", ["All Time", "Last 1h", "Last 6h", "Last 24h", "Last 7d"], key="time_filter_option")
+    sort_by = f_cols_2[1].selectbox("Sort by", ["Newest", "Most Viewed", "Most Commented"], key="sort_by")
+    category_filter = f_cols_2[2].selectbox("Type", ["All", "Short", "Video", "LIVE", "UPCOMING"], key="category_filter")
+
+# --- Settings moved to Sidebar ---
+with st.sidebar.expander("⚙️ Settings & Pinned", expanded=False):
     st.text_area("Keyword Queries (comma-separated):", key="queries")
     st.markdown("---")
     
@@ -583,36 +647,21 @@ with st.expander("⚙️ Settings & Watchlist", expanded=False):
     st.info("Add video URLs or IDs here to pin them to the Pinned Videos tab.")
     
     # --- CORRECTED DYNAMIC WIDGET LOGIC ---
-    # 1. Create text inputs based on the *list*
-    #    Their state will be in st.session_state[f"pinned_{i}"]
     for i, val in enumerate(st.session_state.pinned_inputs):
-        # FIX: Initialize the widget's state *only if it doesn't exist*
         if f"pinned_{i}" not in st.session_state:
             st.session_state[f"pinned_{i}"] = val
-        # FIX: Render the widget *without* the `value=` param, so it uses its own state
         st.text_input(f"Pinned Video {i+1} (ID or URL):", key=f"pinned_{i}")
 
-    # 2. Check the *state of the last widget* to see if we need a new empty one
     last_key = f"pinned_{len(st.session_state.pinned_inputs) - 1}"
     if last_key in st.session_state and st.session_state[last_key].strip() != "":
         st.session_state.pinned_inputs.append("")
-        # Need to re-run to show the new empty box
         st.rerun()
 
-    # 3. Synchronize the list `pinned_inputs` from the widget states
-    #    This is needed so consolidation logic (line 626) works.
     new_values = []
     for i in range(len(st.session_state.pinned_inputs)):
         new_values.append(st.session_state.get(f"pinned_{i}", ""))
     st.session_state.pinned_inputs = new_values
     # --- END CORRECTION ---
-    
-    # ====================================================================
-    # 🔹 REMOVED WATCHLIST SETTINGS 🔹
-    # ====================================================================
-    # (The entire "Watch List" section from the expander has been removed)
-    # ====================================================================
-    
 
 
 # Consolidate pins from settings into the main list of pinned IDs
@@ -630,19 +679,7 @@ for part in st.session_state.pinned_inputs:
 st.session_state.pinned_video_ids = list(manual_pins)
 
 
-# --- FILTER WIDGETS AND LOGIC (BEFORE TABS) ---
-with st.expander("🎛️ Filter Videos", expanded=False):
-    # Responsive filter layout
-    f_cols_1 = st.columns(2)
-    search_query = f_cols_1[0].text_input("🔍 Search", key="search_query")
-    selected_channel = f_cols_1[1].selectbox("Channel", ["All Channels"] + all_channels, key="selected_channel")
-    
-    f_cols_2 = st.columns(3)
-    time_filter_option = f_cols_2[0].selectbox("Timeframe", ["All Time", "Last 1h", "Last 6h", "Last 24h", "Last 7d"], key="time_filter_option")
-    sort_by = f_cols_2[1].selectbox("Sort by", ["Newest", "Most Viewed", "Most Commented"], key="sort_by")
-    category_filter = f_cols_2[2].selectbox("Type", ["All", "Short", "Video", "LIVE", "UPCOMING"], key="category_filter")
-
-# Apply filtering
+# --- Apply filtering ---
 df_filtered = df.copy()
 if time_filter_option != "All Time":
     hours_map = {"Last 1h": 1, "Last 6h": 6, "Last 24h": 24, "Last 7d": 168}
@@ -660,16 +697,21 @@ elif sort_by == "Most Viewed": df_filtered = df_filtered.sort_values(by="views",
 elif sort_by == "Most Commented": df_filtered = df_filtered.sort_values(by="comments", ascending=False)
 
 
+# --- Define special DataFrames for shelves/tabs ---
+df_alerts = df_filtered[df_filtered['views'] > ALERT_VIEW_THRESHOLD].sort_values(by='views', ascending=False)
+df_live = df_filtered[df_filtered['liveStatus'].isin(['LIVE', 'UPCOMING'])].sort_values(by='liveStatus', ascending=True)
+
+
 # ========================================================
 # 🔹 TABS & LAYOUT 🔹
 # ========================================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Main", "📈 Analytics", "📌 Pinned", "📺 Watch List"])
+tab1, tab_alerts, tab2, tab3, tab4 = st.tabs([
+    "📊 Main", "🚨 Alerts", "📈 Analytics", "📌 Pinned", "📺 Watch List"
+])
 
 with tab1:
     with st.expander("⚙️ Actions & Data Management", expanded=False):
-        # --- ACTION BUTTONS ---
-        # Kept only the Quick Update button and changed its label
-        if st.button("⚡ Quick Update", use_container_width=True, help="Quick Update (Last Hour)"):
+        if st.button("⚡ Quick Update (Refresh)", use_container_width=True, help="Quick Update (Last Hour)"):
             with st.spinner('Fetching latest videos...'):
                 queries = [q.strip() for q in st.session_state.queries.split(',') if q.strip()]
                 latest_video_objs = []
@@ -691,33 +733,54 @@ with tab1:
             st.session_state.last_updated = datetime.now(IST)
             st.rerun()
 
-    # --- VIDEO LIST ---
-    st.markdown("### Video List")
     st.markdown(f"<p style='font-size: 0.9em; margin-top: -10px;'>Last updated: {st.session_state.last_updated.strftime('%d %b %Y, %I:%M %p IST')}</p>", unsafe_allow_html=True)
     
+    # --- Shelf 1: Live & Upcoming ---
+    if not df_live.empty:
+        st.subheader("🔴 Live & Upcoming")
+        cols = st.columns(len(df_live))
+        for i, (col, (idx, row)) in enumerate(zip(cols, df_live.iterrows())):
+            with col:
+                render_video_card(row, is_pinned_view=False, key_prefix=f"live_{row['videoId']}")
+        st.divider()
+
+    # --- Main Video List ---
+    st.subheader("All Videos")
     display_df = df_filtered.copy()
 
     if display_df.empty:
-        st.info("No videos found matching your criteria. Try refreshing or adjusting filters.")
+        st.info("No videos found matching your criteria. Try adjusting filters.")
     else:
         st.markdown(f"**Showing {len(display_df)} videos**")
         for i, row in display_df.iterrows():
-            render_video_card(row, is_pinned_view=False)
+            render_video_card(row, is_pinned_view=False, key_prefix=f"main_{row['videoId']}")
 
+# --- NEW ALERTS TAB ---
+with tab_alerts:
+    st.header("🚨 High-Priority Alerts")
+    st.markdown(f"Showing all videos with over **{ALERT_VIEW_THRESHOLD:,}** views that match your filters.")
+    
+    if df_alerts.empty:
+        st.info("No high-priority alerts found matching your criteria.")
+    else:
+        st.markdown(f"**Found {len(df_alerts)} alert(s)**")
+        for i, row in df_alerts.iterrows():
+            # Use a unique key prefix
+            render_video_card(row, is_pinned_view=False, key_prefix=f"alert_tab_{row['videoId']}")
 
 with tab2:
     st.header("📈 Analytics")
     st.markdown("In-depth analysis of the currently filtered video data.")
     
     if df_filtered.empty:
-        st.warning("No data matches the current filters. Please adjust filters on the Main tab.")
+        st.warning("No data matches the current filters. Please adjust filters in the sidebar.")
     else:
-        # --- KPI CARDS ---
+        # --- KPI CARDS (for filtered data) ---
         total_videos, total_views, total_comments = len(df_filtered), df_filtered['views'].sum(), df_filtered['comments'].sum()
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("Videos Found", f"{total_videos}")
-        kpi2.metric("Total Views", f"{total_views:,}")
-        kpi3.metric("Total Comments", f"{total_comments:,}")
+        kpi1.metric("Filtered Videos", f"{total_videos}")
+        kpi2.metric("Filtered Views", f"{total_views:,}")
+        kpi3.metric("Filtered Comments", f"{total_comments:,}")
         st.markdown("---")
         
         # --- SENTIMENT & KEYWORD ANALYSIS ---
@@ -733,12 +796,12 @@ with tab2:
         st.markdown("---")
         
         # --- CHARTS ---
-        st.markdown("#### Top 10 Most Viewed Videos")
+        st.markdown("#### Top 10 Most Viewed Videos (Filtered)")
         top_10 = df_filtered.sort_values(by='views', ascending=False).head(10)
         top_10['label'] = top_10['title'].str[:30] + '...'
         st.bar_chart(top_10, x='label', y='views')
         
-        st.markdown("#### Videos Published Over Time")
+        st.markdown("#### Videos Published Over Time (Filtered)")
         df_daily = df_filtered.set_index('publishedAt').resample('D').size().reset_index(name='count')
         st.line_chart(df_daily.rename(columns={'publishedAt':'Date', 'count':'Videos'}), x='Date', y='Videos')
 
@@ -749,7 +812,7 @@ with tab3:
     pinned_ids = st.session_state.get('pinned_video_ids', [])
 
     if not pinned_ids:
-        st.info("No videos have been pinned yet. Click the 📌 icon on the Main tab to pin a video.")
+        st.info("No videos have been pinned yet. Click the 📌 icon on a video to pin it.")
     else:
         with st.spinner("Fetching details for pinned videos..."):
             pinned_details = get_video_details([{'videoId': v_id} for v_id in pinned_ids])
@@ -760,20 +823,18 @@ with tab3:
             
             st.markdown(f"**Showing {len(pinned_display_df)} pinned videos**")
             for i, row in pinned_display_df.iterrows():
-                render_video_card(row, is_pinned_view=True)
+                render_video_card(row, is_pinned_view=True, key_prefix=f"pinned_{row['videoId']}")
         else:
             st.warning("Could not fetch details for pinned videos.")
 
 with tab4:
     st.header("📺 Channel Watch List")
-    st.markdown("A list of channels to monitor. Add channels from the Settings expander at the top.")
+    st.markdown("A list of channels to monitor. Add channels using the '📺 Add' button on any video.")
 
     # Parse inputs to get channel IDs
     watchlist_ids = set()
     unparsed_entries = []
     
-    # We now need to manually parse the list from session state
-    # This list is the "source of truth"
     current_watchlist_entries = st.session_state.get('watchlist_inputs', [""])
     
     with st.spinner("Resolving channel handles..."):
@@ -781,9 +842,7 @@ with tab4:
             entry = entry.strip()
             if not entry: continue
             
-            # Regex for standard UC... channel ID
             uc_match = re.search(r'(UC[a-zA-Z0-9_\-]{22})', entry)
-            # Regex for new @handle format from URL
             handle_match = re.search(r'@([a-zA-Z0-9_.-]+)', entry)
 
             if uc_match:
@@ -795,7 +854,6 @@ with tab4:
                     watchlist_ids.add(channel_id)
                 else:
                     unparsed_entries.append(entry)
-            # Fallback for just an ID
             elif len(entry) == 24 and entry.startswith("UC"):
                 watchlist_ids.add(entry)
             else:
@@ -816,7 +874,6 @@ with tab4:
         elif channel_details:
             for channel in sorted(channel_details, key=lambda x: x['channelName']):
                 with st.container(border=True):
-                    # --- MODIFICATION: Added col3 for remove button ---
                     col1, col2, col3 = st.columns([1, 3, 1]) 
                     with col1:
                         if channel.get('thumbnail'):
@@ -826,17 +883,14 @@ with tab4:
                         st.markdown(f"**Subs:** {channel.get('subscriberCount', 0):,} | **Videos:** {channel.get('videoCount', 0):,}")
                         st.markdown(f"[Go to Channel]({channel['url']})", unsafe_allow_html=True)
                     
-                    # --- NEW: Remove button logic ---
                     with col3:
                         channel_id_to_remove = channel['channelId']
                         if st.button("❌ Remove", key=f"remove_watch_{channel_id_to_remove}", use_container_width=True):
                             
-                            # Read the current raw list
                             current_watchlist = st.session_state.watchlist_inputs
                             new_watchlist = []
                             removed = False
                             
-                            # Re-build the list, skipping entries that match or contain the ID
                             for entry in current_watchlist:
                                 entry_s = entry.strip()
                                 if entry_s == channel_id_to_remove or channel_id_to_remove in entry_s:
@@ -844,13 +898,11 @@ with tab4:
                                 else:
                                     new_watchlist.append(entry)
                             
-                            # Ensure there's still an empty string if list is now empty
                             if not any(not e.strip() for e in new_watchlist) and "" not in new_watchlist:
                                 new_watchlist.append("")
 
                             st.session_state.watchlist_inputs = new_watchlist
                             
-                            # Save the new list to the file
                             try:
                                 with open(WATCHLIST_FILE_PATH, "w") as f:
                                     for entry in st.session_state.watchlist_inputs:
@@ -866,22 +918,20 @@ with tab4:
                         st.write(channel.get('description', 'No description available.'))
 
 
-# --- DOWNLOAD BUTTON ---
+# --- DOWNLOAD BUTTON (MOVED TO SIDEBAR) ---
+st.sidebar.divider()
 df_csv = df_filtered.copy()
-# Clean HTML tags for CSV export
 if "title" in df_csv.columns:
     df_csv["title"] = df_csv["title"].astype(str).str.replace(r'<[^>]+>', '', regex=True)
 if "url" in df_csv.columns:
-    df_csv["Link"] = df_csv["url"] # Use the raw URL for the link
+    df_csv["Link"] = df_csv["url"] 
 
-# Re-apply formatting for export DF
 if not df_csv.empty:
     df_csv["Published Time"] = df_csv["publishedAt"].apply(format_published_time)
-    df_csv["Status"] = df_csv.apply(get_status_icon, axis=1)
+    df_csv["Status"] = df_csv.apply(get_status_icon, axis=1).str.replace(r'<[^>]+>', '', regex=True) # Clean HTML for CSV
 
 export_cols = ["title", "channel", "Published Time", "views", "likes", "comments", "category", "duration", "liveStatus", "Link", "sentiment", "sourceKeyword"]
 
-# Ensure all columns exist before trying to export
 for ccol in export_cols:
     if ccol not in df_csv.columns: 
         if ccol in df.columns:
@@ -890,15 +940,14 @@ for ccol in export_cols:
         else:
             df_csv[ccol] = ""
 
-# Only show download button if there is data
 if not df_csv.empty:
     try:
         buf = BytesIO()
         df_csv.to_csv(buf, index=False, columns=export_cols, encoding='utf-8')
         buf.seek(0)
-        st.download_button("⬇️ Download Data as CSV", data=buf, file_name="cisf_youtube_data.csv", mime="text/csv", use_container_width=True)
+        st.sidebar.download_button("⬇️ Download Data as CSV", data=buf, file_name="cisf_youtube_data.csv", mime="text/csv", use_container_width=True)
     except Exception as e:
-        st.error(f"Error preparing download: {e}")
+        st.sidebar.error(f"Error preparing download: {e}")
 
 # Close the connection for the main page render
 conn.close()
