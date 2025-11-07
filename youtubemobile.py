@@ -16,7 +16,7 @@ from dateutil import parser as dateparser
 # --- Page Configuration ---
 st.set_page_config(
     page_title="CISF YouTube Monitor",
-    page_icon="logo.jpeg",
+    page_icon="logo.jpeg", # This file needs to exist in the same directory
     layout="centered"
 )
 
@@ -405,32 +405,33 @@ def render_video_card(row, is_pinned_view=False):
     video_id = row.get('videoId')
 
     # --- FIX: Add a key prefix based on the context (tab) ---
-    # This prevents StreamlitDuplicateElementKey error if a video
-    # is rendered on both the Main tab and the Pinned tab.
     key_prefix = "pinned_view_" if is_pinned_view else "main_view_"
-    # --- END FIX ---
 
     with st.container(border=True):
-        # --- Row 1: Thumbnail + Info ---
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if thumbnail_url:
-                st.image(thumbnail_url, use_container_width=True)
-        with col2:
-            st.markdown(f"**{title}**")
-            st.markdown(f"_{channel}_")
-            st.caption(f"{published_time}")
-            st.markdown(status, unsafe_allow_html=True)
+        # --- Row 1: Thumbnail ---
+        if thumbnail_url:
+            st.image(thumbnail_url, use_container_width=True)
         
-        # --- Row 2: Stats (Collapsible) ---
-        with st.expander("Show Stats"):
-            col3, col4, col5 = st.columns(3)
-            col3.metric("Views", views)
-            col4.metric("Likes", likes)
-            col5.metric("Comments", comments)
+        # --- Row 2: Info ---
+        st.markdown(f"**{title}**")
+        st.markdown(f"_{channel}_")
         
-        # --- Row 3: Actions (NOW 3 COLUMNS) ---
-        col6, col7, col8 = st.columns(3) # <-- Changed to 3 columns
+        # --- MODIFIED ROW: Stats and Time combined in one line ---
+        st.caption(f"Views: {views} | Likes: {likes} | Comments: {comments} | {published_time}")
+        # --- END MODIFICATION ---
+
+        st.markdown(status, unsafe_allow_html=True)
+        
+        # --- Row 3: Stats (REMOVED) ---
+        # col3, col4, col5 = st.columns(3)
+        # col3.metric("Views", views)
+        # col4.metric("Likes", likes)
+        # col5.metric("Comments", comments)
+        
+        st.divider() # Visual separation
+
+        # --- Row 4: Actions ---
+        col6, col7, col8 = st.columns(3) 
 
         with col6:
             # --- Pin/Unpin Button ---
@@ -505,19 +506,22 @@ def render_video_card(row, is_pinned_view=False):
 #
 # ====================================================================
 # 🔹 END OF CARD FUNCTION 🔹
-# ====================================================================
+# =================================_==================================
 #
 
 
 # --- HEADER ---
-# NOTE: You need to have a 'logo.png' file in the same directory for this to work.
-logo_path = "logo.png"
+# NOTE: You need to have a 'logo.png' or 'logo.jpeg' file in the same directory for this to work.
+logo_path = "logo.jpeg" if os.path.exists("logo.jpeg") else "logo.png"
 if os.path.exists(logo_path):
-    with open(logo_path, "rb") as f:
-        logo_b64 = base64.b64encode(f.read()).decode()
-    st.markdown(f"""<div style="text-align: center;">
-        <img src="data:image/jpeg;base64,{logo_b64}" alt="CISF Logo" style="width: 40%; max-width: 150px;">
-    </div>""", unsafe_allow_html=True)
+    try:
+        with open(logo_path, "rb") as f:
+            logo_b64 = base64.b64encode(f.read()).decode()
+        st.markdown(f"""<div style="text-align: center;">
+            <img src="data:image/jpeg;base64,{logo_b64}" alt="CISF Logo" style="width: 40%; max-width: 150px;">
+        </div>""", unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Could not load logo: {e}")
 
 st.markdown("<h1 style='text-align: center; font-size: 1.8em;'>CISF YouTube Monitoring Tool</h1>", unsafe_allow_html=True)
 st.markdown("<h3 style='text-align: center; color: var(--subheader-color); font-size: 1.2em;'>YouTube Dashboard</h3>", unsafe_allow_html=True)
@@ -664,10 +668,6 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Main", "📈 Analytics", "📌 Pinned", 
 with tab1:
     with st.expander("⚙️ Actions & Data Management", expanded=False):
         # --- ACTION BUTTONS ---
-        # Removed action_cols = st.columns(3)
-        # Removed the 'Refresh' button logic that was here.
-        # Removed the 'Clear All' button logic that was here.
-        
         # Kept only the Quick Update button and changed its label
         if st.button("⚡ Quick Update", use_container_width=True, help="Quick Update (Last Hour)"):
             with st.spinner('Fetching latest videos...'):
@@ -688,8 +688,8 @@ with tab1:
                         if details:
                             db_upsert_videos(conn, details)
                 
-                st.session_state.last_updated = datetime.now(IST)
-                st.rerun()
+            st.session_state.last_updated = datetime.now(IST)
+            st.rerun()
 
     # --- VIDEO LIST ---
     st.markdown("### Video List")
@@ -797,7 +797,7 @@ with tab4:
                     unparsed_entries.append(entry)
             # Fallback for just an ID
             elif len(entry) == 24 and entry.startswith("UC"):
-                 watchlist_ids.add(entry)
+                watchlist_ids.add(entry)
             else:
                 unparsed_entries.append(entry)
 
@@ -869,8 +869,10 @@ with tab4:
 # --- DOWNLOAD BUTTON ---
 df_csv = df_filtered.copy()
 # Clean HTML tags for CSV export
-df_csv["title"] = df_csv["title"].str.replace(r'<[^>]+>', '', regex=True)
-df_csv["Link"] = df_csv["url"] # Use the raw URL for the link
+if "title" in df_csv.columns:
+    df_csv["title"] = df_csv["title"].astype(str).str.replace(r'<[^>]+>', '', regex=True)
+if "url" in df_csv.columns:
+    df_csv["Link"] = df_csv["url"] # Use the raw URL for the link
 
 # Re-apply formatting for export DF
 if not df_csv.empty:
@@ -890,10 +892,13 @@ for ccol in export_cols:
 
 # Only show download button if there is data
 if not df_csv.empty:
-    buf = BytesIO()
-    df_csv.to_csv(buf, index=False, columns=export_cols, encoding='utf-8')
-    buf.seek(0)
-    st.download_button("⬇️ Download Data as CSV", data=buf, file_name="cisf_youtube_data.csv", mime="text/csv", use_container_width=True)
+    try:
+        buf = BytesIO()
+        df_csv.to_csv(buf, index=False, columns=export_cols, encoding='utf-8')
+        buf.seek(0)
+        st.download_button("⬇️ Download Data as CSV", data=buf, file_name="cisf_youtube_data.csv", mime="text/csv", use_container_width=True)
+    except Exception as e:
+        st.error(f"Error preparing download: {e}")
 
 # Close the connection for the main page render
 conn.close()
