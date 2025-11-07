@@ -363,6 +363,15 @@ div.stButton > button:hover {
 .st-emotion-cache-1n6n36p { 
     height: 100%; 
 }
+/* Popover button */
+.st-emotion-cache-1oogi0e {
+    background-color: var(--button-bg); color: var(--button-text); border-radius: 25px; font-size: 14px;
+    font-weight: bold; padding: 10px 24px; border: 2px solid #046a38;
+    transition: all 0.3s ease-in-out; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.st-emotion-cache-1oogi0e:hover {
+    background-color: var(--button-hover-bg); border-color: #ff671f;
+}
 </style>""", unsafe_allow_html=True)
 
 # Helper functions for formatting
@@ -375,12 +384,17 @@ def get_status_icon(row):
     if row['liveStatus'] == 'UPCOMING': return "<span style='color:orange;'>🟠 UPCOMING</span>"
     return "🎬 Short" if row['category'] == 'Short' else "▶️ Video"
 
-# Function to render a video card (re-usable for tab1 and tab3)
+#
+# ====================================================================
+# 🔹 RENDER VIDEO CARD FUNCTION (THIS IS THE MAIN CHANGE) 🔹
+# ====================================================================
+#
 def render_video_card(row, is_pinned_view=False):
     
     # Format data for display
     title = row.get('title', 'No Title')
     channel = row.get('channel', 'No Channel')
+    channel_id = row.get('channelId') # <-- Need this for watchlist
     published_time = format_published_time(row.get('publishedAt'))
     status = get_status_icon(row)
     views = f"{int(row.get('views', 0)):,}"
@@ -409,10 +423,11 @@ def render_video_card(row, is_pinned_view=False):
             col4.metric("Likes", likes)
             col5.metric("Comments", comments)
         
-        # --- Row 3: Actions ---
-        col6, col7 = st.columns([1,1])
+        # --- Row 3: Actions (NOW 3 COLUMNS) ---
+        col6, col7, col8 = st.columns(3) # <-- Changed to 3 columns
+
         with col6:
-            # Pin/Unpin Button
+            # --- Pin/Unpin Button ---
             if is_pinned_view:
                 if st.button("❌ Unpin", key=f"unpin_{video_id}", use_container_width=True):
                     st.session_state.pinned_video_ids.remove(video_id)
@@ -428,9 +443,49 @@ def render_video_card(row, is_pinned_view=False):
                     st.rerun()
         
         with col7:
-            # *** MODIFICATION: Replaced button with st.popover ***
+            # --- NEW WATCHLIST BUTTON ---
+            is_in_watchlist = False
+            if channel_id:
+                for item in st.session_state.watchlist_inputs:
+                    if channel_id in item:
+                        is_in_watchlist = True
+                        break
+            
+            if is_in_watchlist:
+                st.button("📺 Added", key=f"watch_{video_id}", use_container_width=True, disabled=True)
+            else:
+                if st.button("📺 Add", key=f"watch_{video_id}", use_container_width=True, help="Add channel to Watch List"):
+                    if channel_id:
+                        # Add the channel ID to the session state list
+                        if st.session_state.watchlist_inputs and st.session_state.watchlist_inputs[-1] == "":
+                            st.session_state.watchlist_inputs.pop()
+                        
+                        st.session_state.watchlist_inputs.append(channel_id)
+                        st.session_state.watchlist_inputs.append("") # Add the empty string back
+                        
+                        # --- Also save to file automatically ---
+                        try:
+                            with open(WATCHLIST_FILE_PATH, "w") as f:
+                                for entry in st.session_state.watchlist_inputs:
+                                    if entry.strip():
+                                        f.write(f"{entry.strip()}\n")
+                            st.toast(f"Added {channel} to Watch List!", icon="📺")
+                        except Exception as e:
+                            st.error(f"Could not save watchlist: {e}")
+                        
+                        st.rerun() # Rerun to update button state to "Added"
+                    else:
+                        st.toast("Could not find Channel ID.", icon="🚨")
+
+        with col8:
+            # --- Play Button (Popover) ---
             with st.popover("▶️ Play", use_container_width=True):
                 st.video(video_url)
+#
+# ====================================================================
+# 🔹 END OF CARD FUNCTION 🔹
+# ====================================================================
+#
 
 
 # --- HEADER ---
@@ -460,7 +515,6 @@ if "started" not in st.session_state:
         except Exception: pass
     conn.close()
     st.session_state.last_updated_api = None
-    # st.session_state.video_to_play = None  # <-- This is no longer needed
     st.session_state.last_updated = datetime.now(IST)
     st.session_state.pinned_inputs = [""]
     
@@ -512,7 +566,7 @@ with st.expander("⚙️ Settings & Watchlist", expanded=False):
     
     st.markdown("---")
     st.markdown("## 📺 Watch List")
-    st.info("Add channel URLs or IDs, then click Update.")
+    st.info("Add channel URLs or IDs. Channels are also added automatically via the '📺 Add' button.")
     new_watchlist_values = []
     for i, val in enumerate(st.session_state.watchlist_inputs):
         v = st.text_input(f"Channel {i+1} (ID or URL):", val, key=f"watchlist_{i}")
@@ -581,7 +635,6 @@ elif sort_by == "Most Commented": df_filtered = df_filtered.sort_values(by="comm
 
 # ========================================================
 # 🔹 TABS & LAYOUT 🔹
-# (The main player logic has been removed from here)
 # ========================================================
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Main", "📈 Analytics", "📌 Pinned", "📺 Watch List"])
 
@@ -661,8 +714,6 @@ with tab1:
     st.markdown(f"<p style='font-size: 0.9em; margin-top: -10px;'>Last updated: {st.session_state.last_updated.strftime('%d %b %Y, %I:%M %p IST')}</p>", unsafe_allow_html=True)
     
     display_df = df_filtered.copy()
-    display_df["Published Time"] = display_df["publishedAt"].apply(format_published_time)
-    display_df["Status"] = display_df.apply(get_status_icon, axis=1)
 
     if display_df.empty:
         st.info("No videos found matching your criteria. Try refreshing or adjusting filters.")
@@ -725,9 +776,6 @@ with tab3:
             pinned_display_df = pd.DataFrame(pinned_details)
             pinned_display_df['publishedAt'] = pd.to_datetime(pinned_display_df['publishedAt'], errors='coerce', utc=True)
             
-            pinned_display_df["Published Time"] = pinned_display_df["publishedAt"].apply(format_published_time)
-            pinned_display_df["Status"] = pinned_display_df.apply(get_status_icon, axis=1)
-
             st.markdown(f"**Showing {len(pinned_display_df)} pinned videos**")
             for i, row in pinned_display_df.iterrows():
                 render_video_card(row, is_pinned_view=True)
