@@ -593,7 +593,7 @@ all_channels = sorted(df['channel'].unique()) if not df.empty else []
 
 st.sidebar.markdown(f"**Time:** {datetime.now(IST).strftime('%d %b %Y, %I:%M %p')}")
 
-# --- Actions moved to Sidebar ---
+# --- Refresh button moved to sidebar ---
 if st.sidebar.button("⚡ Quick Update (Refresh)", use_container_width=True, help="Quick Update (Last Hour)"):
     with st.spinner('Fetching latest videos...'):
         queries = [q.strip() for q in st.session_state.queries.split(',') if q.strip()]
@@ -613,7 +613,7 @@ if st.sidebar.button("⚡ Quick Update (Refresh)", use_container_width=True, hel
                 if details:
                     db_upsert_videos(conn, details)
         
-            st.session_state.last_updated = datetime.now(IST)
+    st.session_state.last_updated = datetime.now(IST)
     st.rerun()
 
 st.sidebar.divider()
@@ -698,6 +698,7 @@ elif sort_by == "Most Commented": df_filtered = df_filtered.sort_values(by="comm
 
 
 # --- Define special DataFrames for shelves/tabs ---
+# df_alerts is still defined but no longer used for a tab
 df_alerts = df_filtered[df_filtered['views'] > ALERT_VIEW_THRESHOLD].sort_values(by='views', ascending=False)
 df_live = df_filtered[df_filtered['liveStatus'].isin(['LIVE', 'UPCOMING'])].sort_values(by='liveStatus', ascending=True)
 
@@ -705,8 +706,9 @@ df_live = df_filtered[df_filtered['liveStatus'].isin(['LIVE', 'UPCOMING'])].sort
 # ========================================================
 # 🔹 TABS & LAYOUT 🔹
 # ========================================================
-tab1, tab_alerts, tab2, tab3, tab4 = st.tabs([
-    "📊 Main", "🚨 Alerts", "📈 Analytics", "📌 Pinned", "📺 Watch List"
+# --- MODIFIED: Renamed 'Alerts' tab to 'Live' ---
+tab1, tab_live, tab2, tab3, tab4 = st.tabs([
+    "📊 Main", "🔴 Live", "📈 Analytics", "📌 Pinned", "📺 Watch List"
 ])
 
 with tab1:
@@ -755,18 +757,18 @@ with tab1:
         for i, row in display_df.iterrows():
             render_video_card(row, is_pinned_view=False, key_prefix=f"main_{row['videoId']}")
 
-# --- NEW ALERTS TAB ---
-with tab_alerts:
-    st.header("🚨 High-Priority Alerts")
-    st.markdown(f"Showing all videos with over **{ALERT_VIEW_THRESHOLD:,}** views that match your filters.")
+# --- MODIFIED: This tab now shows LIVE videos, not ALERTS ---
+with tab_live:
+    st.header("🔴 Live & Upcoming")
+    st.markdown("Showing all LIVE and UPCOMING videos that match your filters.")
     
-    if df_alerts.empty:
-        st.info("No high-priority alerts found matching your criteria.")
+    if df_live.empty:
+        st.info("No Live or Upcoming videos found matching your criteria.")
     else:
-        st.markdown(f"**Found {len(df_alerts)} alert(s)**")
-        for i, row in df_alerts.iterrows():
+        st.markdown(f"**Found {len(df_live)} video(s)**")
+        for i, row in df_live.iterrows():
             # Use a unique key prefix
-            render_video_card(row, is_pinned_view=False, key_prefix=f"alert_tab_{row['videoId']}")
+            render_video_card(row, is_pinned_view=False, key_prefix=f"live_tab_{row['videoId']}")
 
 with tab2:
     st.header("📈 Analytics")
